@@ -56,7 +56,7 @@ class DeepPolar(PolarCode):
         elif len(actions.shape) == 3:
             return torch.eye(2, device = inds.device)[inds].reshape(actions.shape[0], actions.shape[1], -1)
 
-    def define_kernel_nns(self, ell, unfrozen = None, fnet = 'KO', gnet = 'KO', shared = False, augment = False):
+    def define_kernel_nns(self, ell, unfrozen = None, fnet = 'KO', gnet = 'KO', shared = False):
 
         if 'KO' in fnet:
             self.fnet_dict = {}
@@ -70,9 +70,6 @@ class DeepPolar(PolarCode):
             self.gnet_dict = None
         dec_hidden_size = self.args.dec_hidden_size
         enc_hidden_size = self.args.enc_hidden_size
-
-        if augment:
-            self.enc_augment = True
 
         depth = 1
         assert len(unfrozen) > 0, "No unfrozen bits!"
@@ -106,13 +103,13 @@ class DeepPolar(PolarCode):
             self.gnet_dict[depth] = {}
             if shared:
                 if gnet == 'KO':
-                    self.gnet_dict[depth] = g_Full(ell, enc_hidden_size, ell-1, depth = self.args.g_depth, skip_depth = self.args.g_skip_depth, skip_layer = self.args.g_skip_layer, ell = ell, activation = self.args.enc_activation, use_skip = self.args.skip, augment = augment).to(self.device)
+                    self.gnet_dict[depth] = g_Full(ell, enc_hidden_size, ell-1, depth = self.args.g_depth, skip_depth = self.args.g_skip_depth, skip_layer = self.args.g_skip_layer, ell = ell, activation = self.args.enc_activation, use_skip = self.args.skip).to(self.device)
             else:
                 bit_position = 0
                 if gnet == 'KO':
-                    self.gnet_dict[depth][bit_position] = g_Full(ell, enc_hidden_size, ell-1, depth = self.args.g_depth, skip_depth = self.args.g_skip_depth, skip_layer = self.args.g_skip_layer, ell = ell, activation = self.args.enc_activation, use_skip = self.args.skip, augment = augment).to(self.device)
+                    self.gnet_dict[depth][bit_position] = g_Full(ell, enc_hidden_size, ell-1, depth = self.args.g_depth, skip_depth = self.args.g_skip_depth, skip_layer = self.args.g_skip_layer, ell = ell, activation = self.args.enc_activation, use_skip = self.args.skip).to(self.device)
 
-    def define_and_load_nns(self, ell, kernel_load_path = None, fnet = 'KO', gnet = 'KO', shared = True, augment = False, dataparallel = False):
+    def define_and_load_nns(self, ell, kernel_load_path = None, fnet = 'KO', gnet = 'KO', shared = True, dataparallel = False):
 
         if 'KO' in fnet:
             self.fnet_dict = {}
@@ -126,9 +123,6 @@ class DeepPolar(PolarCode):
             self.gnet_dict = None
         dec_hidden_size = self.args.dec_hidden_size
         enc_hidden_size = self.args.enc_hidden_size
-
-        if augment:
-            self.enc_augment = True
 
         for depth in range(self.n_ell, 0, -1):
             if depth in self.args.polar_depths:
@@ -200,41 +194,33 @@ class DeepPolar(PolarCode):
                                     pass 
                             else:
                                 ckpt_exists = False
-                        if len(unfrozen) == 1 and self.args.predict_direct:
-                            pass
-                        else:
-                            for current_position in unfrozen:
-                                if not self.fnet_dict[depth].get(bit_position):
-                                    self.fnet_dict[depth][bit_position] = {}                          
-                                if num_info_in_subproj[current_position] == 1 and self.args.predict_direct:
-                                    input_size = int(np.prod([self.depth_map[d] for d in range(1, depth+1)]) + (int(self.args.onehot)+1)*current_position*np.prod([self.depth_map[d] for d in range(1, depth)]))
-                                    output_size = 1
-                                    dec_use_skip = False 
-                                else:
-                                    input_size = ell + (int(self.args.onehot)+1)*current_position
-                                    output_size = 1
+                        for current_position in unfrozen:
+                            if not self.fnet_dict[depth].get(bit_position):
+                                self.fnet_dict[depth][bit_position] = {}                          
+                            input_size = ell + (int(self.args.onehot)+1)*current_position
+                            output_size = 1
 
-                                # if current_position == 0:
-                                #     self.fnet_dict[depth][bit_position][current_position] = f_Full(ell**depth, dec_hidden_size, 1, activation = self.args.dec_activation, dropout_p = self.args.dropout_p, depth = self.args.f_depth).to(self.device)
-                                # else:
-                                self.fnet_dict[depth][bit_position][current_position] = f_Full(input_size, dec_hidden_size, output_size, activation = self.args.dec_activation, dropout_p = self.args.dropout_p, depth = self.args.f_depth, use_norm = self.args.use_norm).to(self.device)
-                                if ckpt_exists and not (num_info_in_subproj[current_position] == 1 and self.args.predict_direct):
-                                    try:
-                                        f_ckpt = ckpt[0][1][0][current_position].state_dict()
-                                    except:
-                                        print(unfrozen)
-                                    self.fnet_dict[depth][bit_position][current_position].load_state_dict(f_ckpt)
-                                if dataparallel:
-                                    self.fnet_dict[depth][bit_position][current_position] = nn.DataParallel(self.fnet_dict[depth][bit_position][current_position])
+                            # if current_position == 0:
+                            #     self.fnet_dict[depth][bit_position][current_position] = f_Full(ell**depth, dec_hidden_size, 1, activation = self.args.dec_activation, dropout_p = self.args.dropout_p, depth = self.args.f_depth).to(self.device)
+                            # else:
+                            self.fnet_dict[depth][bit_position][current_position] = f_Full(input_size, dec_hidden_size, output_size, activation = self.args.dec_activation, dropout_p = self.args.dropout_p, depth = self.args.f_depth, use_norm = self.args.use_norm).to(self.device)
+                            if ckpt_exists
+                                try:
+                                    f_ckpt = ckpt[0][1][0][current_position].state_dict()
+                                except:
+                                    print(unfrozen)
+                                self.fnet_dict[depth][bit_position][current_position].load_state_dict(f_ckpt)
+                            if dataparallel:
+                                self.fnet_dict[depth][bit_position][current_position] = nn.DataParallel(self.fnet_dict[depth][bit_position][current_position])
 
             if 'KO' in gnet:
                 self.gnet_dict[depth] = {}
                 if shared:
                     if gnet == 'KO':
                         if not dataparallel:
-                            self.gnet_dict[depth] = g_Full(ell, enc_hidden_size, ell-1, depth = self.args.g_depth, skip_depth = self.args.g_skip_depth, skip_layer = self.args.g_skip_layer, ell = ell, use_skip = self.args.skip, augment = augment).to(self.device)
+                            self.gnet_dict[depth] = g_Full(ell, enc_hidden_size, ell-1, depth = self.args.g_depth, skip_depth = self.args.g_skip_depth, skip_layer = self.args.g_skip_layer, ell = ell, use_skip = self.args.skip).to(self.device)
                         else:
-                            self.gnet_dict[depth] = nn.DataParallel(g_Full(ell, enc_hidden_size, ell-1, depth = self.args.g_depth, skip_depth = self.args.g_skip_depth, skip_layer = self.args.g_skip_layer, ell = ell, use_skip = self.args.skip, augment = augment)).to(self.device)
+                            self.gnet_dict[depth] = nn.DataParallel(g_Full(ell, enc_hidden_size, ell-1, depth = self.args.g_depth, skip_depth = self.args.g_skip_depth, skip_layer = self.args.g_skip_layer, ell = ell, use_skip = self.args.skip)).to(self.device)
                 else:
                     for bit_position in range(self.N // proj_size):
                         proj = np.arange(bit_position*proj_size, (bit_position+1)*proj_size)
@@ -248,18 +234,14 @@ class DeepPolar(PolarCode):
 
                         if num_info_in_proj > 0:
                             if gnet == 'KO':
-                                self.gnet_dict[depth][bit_position] = g_Full(ell, enc_hidden_size, ell-1, depth = self.args.g_depth, skip_depth = self.args.g_skip_depth, skip_layer = self.args.g_skip_layer, ell = ell, activation = self.args.enc_activation, use_skip = self.args.skip, augment = augment).to(self.device)
-                            if not augment:
-                                if kernel_load_path is not None:
-                                    try:
-                                        ckpt = torch.load(os.path.join(kernel_load_path, f'{ell}_{len(unfrozen)}.pt'))
-                                        self.gnet_dict[depth][bit_position].load_state_dict(ckpt[1][1][0].state_dict())
-                                    except FileNotFoundError:
-                                        print(f"File not found for ell = {ell}, num_unfrozen = {len(unfrozen)}")
-                                        pass
-                            else:
-                                # init encoders with polar code (so zero + small gaussian weight init)
-                                self.gnet_dict[depth][bit_position].apply(weights_init)
+                                self.gnet_dict[depth][bit_position] = g_Full(ell, enc_hidden_size, ell-1, depth = self.args.g_depth, skip_depth = self.args.g_skip_depth, skip_layer = self.args.g_skip_layer, ell = ell, activation = self.args.enc_activation, use_skip = self.args.skip).to(self.device)
+                            if kernel_load_path is not None:
+                                try:
+                                    ckpt = torch.load(os.path.join(kernel_load_path, f'{ell}_{len(unfrozen)}.pt'))
+                                    self.gnet_dict[depth][bit_position].load_state_dict(ckpt[1][1][0].state_dict())
+                                except FileNotFoundError:
+                                    print(f"File not found for ell = {ell}, num_unfrozen = {len(unfrozen)}")
+                                    pass
                             if dataparallel:
                                 self.gnet_dict[depth][bit_position] = nn.DataParallel(self.gnet_dict[depth][bit_position])
 
@@ -317,7 +299,7 @@ class DeepPolar(PolarCode):
             power_constrained_u = stequantize(power_constrained_u)
         return power_constrained_u
 
-    def deep_polar_encode(self, msg_bits, binary = False):
+    def deeppolar_encode(self, msg_bits, binary = False):
         u = torch.ones(msg_bits.shape[0], self.N, dtype=torch.float).to(self.device)
         u[:, self.info_positions] = msg_bits
         for d in range(1, self.n_ell+1):
@@ -339,10 +321,7 @@ class DeepPolar(PolarCode):
                 num_nonzero_subproj = sum([int(x != 0) for x in num_info_in_subproj])
                 
                 if num_info_in_proj > 0:
-                    if self.args.predict_direct and num_info_in_proj == 1:
-                        info_bits_present = False
-                    else:
-                        info_bits_present = True          
+                    info_bits_present = True          
                 else:
                     info_bits_present = False         
                 if d in self.args.polar_depths:
@@ -374,31 +353,6 @@ class DeepPolar(PolarCode):
     def power_constraint(self, codewords):
         return F.normalize(codewords, p=2, dim=1)*np.sqrt(self.N)
 
-    def get_decoder_augment_singlebit(self, dec_chunks, current_position, depth):
-        # if encoding is [0,0,<info>,0] - even decoding should be specific for repetition coding, or other
-        ell = self.depth_map[depth]
-        assert len(dec_chunks) == ell , "decoder_augment_singlebit: Number of chunks should be equal to ell"
-        if ell == 2:
-            if current_position == 0:
-                Lu = dec_chunks[0].clone()
-            elif current_position == 1:
-                Lu = dec_chunks[0].clone() + dec_chunks[1].clone()
-        elif ell == 4:
-            if current_position == 0:
-                Lu = dec_chunks[0].clone()
-            elif current_position == 1:
-                Lu = dec_chunks[0].clone() + dec_chunks[1].clone()
-            elif current_position == 2:
-                Lu = dec_chunks[0].clone() + dec_chunks[2].clone()
-            elif current_position == 3:
-                Lu = dec_chunks[0].clone() + dec_chunks[1].clone() + dec_chunks[2].clone() + dec_chunks[3].clone()
-        else:
-            raise NotImplementedError
-        
-        if len(Lu.shape) == 3:
-            Lu = Lu.squeeze(2)
-        return Lu
-
     def encode_chunks_plotkin(self, enc_chunks, ell = None):
 
         # message shape is (batch, k)
@@ -422,27 +376,6 @@ class DeepPolar(PolarCode):
                 # [u v] encoded to [(u,v) xor v]
                 u = torch.cat((u[:, :i], u[:, i:i+num_bits].clone() * u[:, i+num_bits: i+2*num_bits], u[:, i+num_bits:]), dim=1)
         return u
-
-    def fill_partial_sums(self, message, partial_sums):
-
-        # message shape is (batch, k)
-        # BPSK convention : 0 -> +1, 1 -> -1
-        # Therefore, xor(a, b) = a*b
-        info_positions = self.info_positions
-        u = torch.ones(message.shape[0], self.N, dtype=torch.float).to(message.device)
-        u[:, info_positions] = message
-        partial_sums[:, 0, :] = u.clone()
-
-        freq = int(np.log2(self.ell)) # TODO : change?
-        for d in range(0, self.n):
-            num_bits = 2**d
-            for i in np.arange(0, self.N, 2*num_bits):
-                # [u v] encoded to [u xor(u,v)]
-                u = torch.cat((u[:, :i], u[:, i:i+num_bits].clone() * u[:, i+num_bits: i+2*num_bits], u[:, i+num_bits:]), dim=1)
-                # u[:, i:i+num_bits] = u[:, i:i+num_bits].clone() * u[:, i+num_bits: i+2*num_bits].clone
-            if d % freq == freq - 1:
-                partial_sums[:, (d//freq)+1, :] = u.clone()
-        return partial_sums
             
     def deeppolar_parallel_decode(self, noisy_code):
         # Successive cancellation decoder for polar codes
@@ -495,7 +428,7 @@ class DeepPolar(PolarCode):
 
         return decoded_llrs
             
-    def deeppolar_decode(self, noisy_code, gt = None):
+    def deeppolar_decode(self, noisy_code):
         assert noisy_code.shape[1] == self.N
 
         depth = self.n_ell
@@ -505,16 +438,15 @@ class DeepPolar(PolarCode):
         # don't want to go into useless frozen subtrees.
         partial_sums = torch.ones(noisy_code.shape[0], self.n_ell+1, self.N, device=noisy_code.device)
 
-        tf = False
         # function is recursively called (DFS)
         # arguments: Beliefs at the input of node (LLRs at top node), depth of children, bit_position (zero at top node)
 
-        decoded_llrs, partial_sums = self.KO_kernel_decode_depth(noisy_code.unsqueeze(2), depth, 0, decoded_llrs, partial_sums, tf)
+        decoded_llrs, partial_sums = self.deeppolar_decode_depth(noisy_code.unsqueeze(2), depth, 0, decoded_llrs, partial_sums)
         decoded_llrs = decoded_llrs[:, self.info_positions]
 
         return decoded_llrs, torch.sign(decoded_llrs)
     
-    def deeppolar_decode_depth(self, llrs, depth, bit_position, decoded_llrs, partial_sums, tf = False):
+    def deeppolar_decode_depth(self, llrs, depth, bit_position, decoded_llrs, partial_sums):
         # Function to call recursively, for SC decoder
 
         # half_index = self.ell ** (depth - 1)
@@ -542,21 +474,12 @@ class DeepPolar(PolarCode):
         unfrozen = np.array([i for i, x in enumerate(num_info_in_subproj) if x >= 1])
 
         if num_nonzero_subproj > 0:
-            info_bits_present = True  
-            # if num_info_in_proj == 1 and depth > 1:
-            #     print(f'{depth}, {bit_position}')        
+            info_bits_present = True      
         else:
             info_bits_present = False 
 
         if depth in self.args.polar_depths:
             info_bits_present = False
-
-
-        if num_nonzero_subproj == 1 and self.args.predict_direct:
-            decode_only_position = [i for i, x in enumerate(num_info_in_subproj) if x >= 1][0]
-        else:
-            decode_only_position = None
-        # decode_only_position = None
                 
         # This will be input to decoder
         dec_chunks = [llrs[:, (j)*half_index:(j+1)*half_index].clone() for j in range(ell)]
@@ -567,8 +490,7 @@ class DeepPolar(PolarCode):
                 Lu = self.fnet_dict[depth][bit_position](concatenated_chunks)[:, 0, unfrozen]
                 u_hat = torch.tanh(Lu/2)
                 decoded_llrs[:, left_bit_position + unfrozen] = Lu
-                if not tf:
-                    partial_sums[:, depth-1, left_bit_position + unfrozen] = u_hat
+                partial_sums[:, depth-1, left_bit_position + unfrozen] = u_hat
 
             else:
                 for current_position in range(ell):
@@ -584,8 +506,7 @@ class DeepPolar(PolarCode):
                     if bit_position_offset in self.frozen_positions: # frozen 
                         # don't update decoded llrs. It already has ones*prior.
                         # actually don't need this. can skip.
-                        if not tf:
-                            partial_sums[:, depth-1, bit_position_offset] = torch.ones_like(partial_sums[:, depth-1, bit_position_offset])
+                        partial_sums[:, depth-1, bit_position_offset] = torch.ones_like(partial_sums[:, depth-1, bit_position_offset])
                     else: # information bit
                         # This is the decoding.
                         concatenated_chunks = torch.cat(dec_chunks, 2)
@@ -596,16 +517,68 @@ class DeepPolar(PolarCode):
 
                         u_hat = torch.tanh(Lu/2).squeeze(2)
                         decoded_llrs[:, bit_position_offset] = Lu.squeeze(2).squeeze(1)
-                        if not tf:
-                            partial_sums[:, depth-1, bit_position_offset] = u_hat.squeeze(1)
+                        partial_sums[:, depth-1, bit_position_offset] = u_hat.squeeze(1)
 
             # Encoding back the decoded bits - for higher layers.
-            if not tf:
-                # # Compute decoded codeword
+            # # Compute decoded codeword
+            i = left_bit_position * half_index
+            # num_bits = self.ell**(depth-1)
+            num_bits = 1
+
+            enc_chunks = []
+            for j in range(ell):
+                chunk = torch.sign(partial_sums[:, depth-1, i + j*num_bits:i + (j+1)*num_bits]).unsqueeze(2).detach().clone()
+                enc_chunks.append(chunk)
+            if info_bits_present:
+                concatenated_chunks = torch.cat(enc_chunks, 2)
+                if 'KO' in self.args.encoder_type:
+                    if self.shared:
+                        output = torch.cat([self.gnet_dict[depth](concatenated_chunks), partial_sums[:, depth-1, i + (ell-1)*num_bits:i + (ell)*num_bits].unsqueeze(2)], dim=2)
+                    else:
+                        # bit position of the previous depth.
+                        output = torch.cat([self.gnet_dict[depth][bit_position](concatenated_chunks), partial_sums[:, depth-1, i + (ell-1)*num_bits:i + (ell)*num_bits].unsqueeze(2)], dim=2)
+                    output = output.permute(0,2,1).reshape(llrs.shape[0], -1, 1).squeeze(2)
+                else:
+                    output = self.encode_chunks_plotkin(enc_chunks, ell)
+            else:
+                output = self.encode_chunks_plotkin(enc_chunks, ell)
+            partial_sums[:, depth, i : i + num_bits*ell] = output.clone()
+            
+            return decoded_llrs, partial_sums
+
+        # General case
+        else:
+            for current_position in range(ell):
+                bit_position_offset = left_bit_position + current_position
+
+                if current_position > 0:
+                    if self.args.onehot:
+                        prev_decoded = get_onehot(partial_sums[:, depth-1, (current_position -1)*half_index:(current_position)*half_index].unsqueeze(2).sign()).detach().clone()
+                    else:
+                        prev_decoded = partial_sums[:, depth-1, (current_position -1)*half_index:(current_position)*half_index].unsqueeze(2).clone()
+                    dec_chunks.append(prev_decoded)
+                concatenated_chunks = torch.cat(dec_chunks, 2)
+
+                if current_position in unfrozen:
+                    # General decoding ....
+                    # add the decoded bit here
+                    if self.shared:
+                        Lu = self.fnet_dict[depth][current_position](concatenated_chunks).squeeze(2)
+                    else:
+                        # if current_position == 0:
+                        #     Lu = self.fnet_dict[depth][bit_position][current_position](llrs)
+                        # else:
+                        Lu = self.fnet_dict[depth][bit_position][current_position](concatenated_chunks)
+                    decoded_llrs, partial_sums = self.deeppolar_decode_depth(Lu, depth-1, bit_position_offset, decoded_llrs, partial_sums)
+                else:
+                    Lu = self.infty*torch.ones_like(llrs)
+
+
+            # Compute decoded codeword
+            if depth < self.n_ell :
                 i = left_bit_position * half_index
                 # num_bits = self.ell**(depth-1)
-                num_bits = 1
-
+                num_bits = np.prod([self.depth_map[d] for d in range(1, depth)])
                 enc_chunks = []
                 for j in range(ell):
                     chunk = torch.sign(partial_sums[:, depth-1, i + j*num_bits:i + (j+1)*num_bits]).unsqueeze(2).detach().clone()
@@ -624,71 +597,11 @@ class DeepPolar(PolarCode):
                 else:
                     output = self.encode_chunks_plotkin(enc_chunks, ell)
                 partial_sums[:, depth, i : i + num_bits*ell] = output.clone()
-            return decoded_llrs, partial_sums
 
-        # General case
-        else:
-            for current_position in range(ell):
-                bit_position_offset = left_bit_position + current_position
-
-                if decode_only_position is not None and current_position != decode_only_position:
-                    continue
-                elif decode_only_position is not None and current_position == decode_only_position:
-                    Lu = self.get_decoder_augment_singlebit(dec_chunks, decode_only_position, depth).unsqueeze(2)
-                
-                else:
-                    if current_position > 0:
-                        if self.args.onehot:
-                            prev_decoded = get_onehot(partial_sums[:, depth-1, (current_position -1)*half_index:(current_position)*half_index].unsqueeze(2).sign()).detach().clone()
-                        else:
-                            prev_decoded = partial_sums[:, depth-1, (current_position -1)*half_index:(current_position)*half_index].unsqueeze(2).clone()
-                        dec_chunks.append(prev_decoded)
-                    concatenated_chunks = torch.cat(dec_chunks, 2)
-
-                    if current_position in unfrozen:
-                        # General decoding ....
-                        # add the decoded bit here
-                        if self.shared:
-                            Lu = self.fnet_dict[depth][current_position](concatenated_chunks).squeeze(2)
-                        else:
-                            # if current_position == 0:
-                            #     Lu = self.fnet_dict[depth][bit_position][current_position](llrs)
-                            # else:
-                            Lu = self.fnet_dict[depth][bit_position][current_position](concatenated_chunks)
-                        decoded_llrs, partial_sums, partial_sums_sc = self.deeppolar_decode_depth(Lu, depth-1, bit_position_offset, decoded_llrs, partial_sums, tf)
-                    else:
-                        Lu = self.infty*torch.ones_like(llrs)
-
-            if not tf:
-                # Compute decoded codeword
-                if depth < self.n_ell :
-                    i = left_bit_position * half_index
-                    # num_bits = self.ell**(depth-1)
-                    num_bits = np.prod([self.depth_map[d] for d in range(1, depth)])
-                    enc_chunks = []
-                    for j in range(ell):
-                        chunk = torch.sign(partial_sums[:, depth-1, i + j*num_bits:i + (j+1)*num_bits]).unsqueeze(2).detach().clone()
-                        enc_chunks.append(chunk)
-                    if info_bits_present:
-                        concatenated_chunks = torch.cat(enc_chunks, 2)
-                        if 'KO' in self.args.encoder_type:
-                            if self.shared:
-                                output = torch.cat([self.gnet_dict[depth](concatenated_chunks), partial_sums[:, depth-1, i + (ell-1)*num_bits:i + (ell)*num_bits].unsqueeze(2)], dim=2)
-                            else:
-                                # bit position of the previous depth.
-                                output = torch.cat([self.gnet_dict[depth][bit_position](concatenated_chunks), partial_sums[:, depth-1, i + (ell-1)*num_bits:i + (ell)*num_bits].unsqueeze(2)], dim=2)
-                            output = output.permute(0,2,1).reshape(llrs.shape[0], -1, 1).squeeze(2)
-                        else:
-                            output = self.encode_chunks_plotkin(enc_chunks, ell)
-                    else:
-                        output = self.encode_chunks_plotkin(enc_chunks, ell)
-                    partial_sums[:, depth, i : i + num_bits*ell] = output.clone()
-
-                    return decoded_llrs, partial_sums
-                else: # encoding not required for last level - we have already decoded all bits.
-                    return decoded_llrs, partial_sums
-            else:
                 return decoded_llrs, partial_sums
+            else: # encoding not required for last level - we have already decoded all bits.
+                return decoded_llrs, partial_sums
+
 
     def kernel_decode(self, ell, fnet_dict, noisy_code, info_positions = None):
         input_shape = noisy_code.shape[-1]

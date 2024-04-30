@@ -1,11 +1,11 @@
 import torch
 import torch.nn.functional as F
-from torch.distributions import StudentT, Normal
 import numpy as np
 from utils import errors_ber, errors_bler, dec2bitarray, snr_db2sigma
+import time
 
 
-def train(args, polar, optimizer, scheduler, batch_size, train_snr, train_iters, criterion, device, info_positions, binary = False):
+def train(args, polar, optimizer, scheduler, batch_size, train_snr, train_iters, criterion, device, info_positions, binary = False, noise_type = 'awgn'):
 
     if args.N == polar.ell:
         assert len(info_positions) == args.K
@@ -28,19 +28,18 @@ def train(args, polar, optimizer, scheduler, batch_size, train_snr, train_iters,
                 if kernel:
                     codes = polar.kernel_encode(args.kernel_size, polar.gnet_dict[1][0], msg_bits, info_positions, binary = binary)
                 else:
-                    codes = polar.KO_kernel_encode(msg_bits, binary = binary)
+                    codes = polar.deeppolar_encode(msg_bits, binary = binary)
 
-            noisy_codes = polar.channel(codes, train_snr)
+            noisy_codes = polar.channel(codes, train_snr, noise_type)
 
             if 'KO' in args.decoder_type:
-                # decoded_llrs, decoded_bits = polar.KO_decode(noisy_codes, msg_bits if args.tf else None)
                 if kernel:
                     if args.decoder_type == 'KO_parallel':
                         decoded_llrs, decoded_bits = polar.kernel_parallel_decode(args.kernel_size, polar.fnet_dict[1][0], noisy_codes, info_positions)
                     else:
                         decoded_llrs, decoded_bits = polar.kernel_decode(args.kernel_size, polar.fnet_dict[1][0], noisy_codes, info_positions)
                 else:
-                    decoded_llrs, decoded_bits = polar.KO_kernel_decode(noisy_codes, msg_bits if args.tf else None)
+                    decoded_llrs, decoded_bits = polar.deeppolar_decode(noisy_codes)
             elif args.decoder_type == 'SC':
                 decoded_llrs, decoded_bits = polar.sc_decode_new(noisy_codes, train_snr)
 
@@ -72,66 +71,7 @@ def train(args, polar, optimizer, scheduler, batch_size, train_snr, train_iters,
 
     return loss.item(), train_ber
 
-# def deeppolar_full_test(args, polar, KO, snr_range, Test_Data_Generator, device, info_positions, binary = False, num_errors = 100):
-
-#     num_test_batches = len(Test_Data_Generator)
-
-#     bers_KO_test = [0. for ii in snr_range]
-#     blers_KO_test = [0. for ii in snr_range]
-
-#     bers_SC_test = [0. for ii in snr_range]
-#     blers_SC_test = [0. for ii in snr_range]
-
-#     if args.N == KO.ell:
-#         kernel = True 
-#     else:
-#         kernel = False
-
-#     with torch.no_grad():
-#         for (k, msg_bits) in enumerate(Test_Data_Generator):
-
-#             msg_bits = msg_bits.to(device)
-#             polar_code = polar.encode_plotkin(msg_bits)
-#             if 'KO' in args.encoder_type:
-#                 # KO_polar_code = KO.KO_encode(msg_bits)
-#                 if kernel:
-#                     KO_polar_code = KO.kernel_encode(args.kernel_size, KO.gnet_dict[1][0], msg_bits, info_positions, binary = binary)
-#                 else:
-#                     KO_polar_code = KO.KO_kernel_encode(msg_bits, binary = binary)
-#             for snr_ind, snr in enumerate(snr_range):
-#                 noisy_code = polar.channel(polar_code, snr, noise_type = args.noise_type)
-#                 noise = noisy_code - polar_code
-#                 if 'KO' in args.encoder_type:
-#                     noisy_KO_code = KO_polar_code + noise
-#                 else:
-#                     noisy_KO_code = noisy_code
-#                 SC_llrs, decoded_SC_msg_bits = polar.sc_decode_new(noisy_code, snr)
-#                 ber_SC = errors_ber(msg_bits, decoded_SC_msg_bits.sign()).item()
-#                 bler_SC = errors_bler(msg_bits, decoded_SC_msg_bits.sign()).item()
-
-#                 if 'KO' in args.decoder_type:
-#                     if kernel:
-#                         if args.decoder_type == 'KO_parallel':
-#                             KO_llrs, decoded_KO_msg_bits = KO.kernel_parallel_decode(args.kernel_size, KO.fnet_dict[1][0], noisy_KO_code, info_positions)
-#                         else:
-#                             KO_llrs, decoded_KO_msg_bits = KO.kernel_decode(args.kernel_size, KO.fnet_dict[1][0], noisy_KO_code, info_positions)
-#                     else:
-#                         KO_llrs, decoded_KO_msg_bits = KO.KO_kernel_decode(noisy_KO_code, msg_bits if args.tf else None)
-#                 elif args.decoder_type == 'SC':
-#                     KO_llrs, decoded_KO_msg_bits = KO.sc_decode_new(noisy_KO_code, snr)
-
-#                 ber_KO = errors_ber(msg_bits, decoded_KO_msg_bits.sign()).item()
-#                 bler_KO = errors_bler(msg_bits, decoded_KO_msg_bits.sign()).item()
-
-#                 bers_KO_test[snr_ind] += ber_KO/num_test_batches
-#                 bers_SC_test[snr_ind] += ber_SC/num_test_batches
-
-#                 blers_KO_test[snr_ind] += bler_KO/num_test_batches
-#                 blers_SC_test[snr_ind] += bler_SC/num_test_batches
-
-#     return bers_SC_test, blers_SC_test, bers_KO_test, blers_KO_test
-
-def deeppolar_full_test(args, polar, KO, snr_range, device, info_positions, binary=False, num_errors=100):
+def deeppolar_full_test(args, polar, KO, snr_range, device, info_positions, binary=False, num_errors=100, noise_type = 'awgn'):
     bers_KO_test = [0. for _ in snr_range]
     blers_KO_test = [0. for _ in snr_range]
 
@@ -140,6 +80,7 @@ def deeppolar_full_test(args, polar, KO, snr_range, device, info_positions, bina
 
     kernel = args.N == KO.ell
 
+    print(f"TESTING until {num_errors} block errors")
     for snr_ind, snr in enumerate(snr_range):
         total_block_errors_SC = 0
         total_block_errors_KO = 0
@@ -157,9 +98,9 @@ def deeppolar_full_test(args, polar, KO, snr_range, device, info_positions, bina
                     if kernel:
                         KO_polar_code = KO.kernel_encode(args.kernel_size, KO.gnet_dict[1][0], msg_bits, info_positions, binary=binary)
                     else:
-                        KO_polar_code = KO.KO_kernel_encode(msg_bits, binary=binary)
+                        KO_polar_code = KO.deeppolar_encode(msg_bits, binary=binary)
 
-                noisy_code = polar.channel(polar_code, snr, noise_type=args.noise_type)
+                noisy_code = polar.channel(polar_code, snr, noise_type)
                 noise = noisy_code - polar_code
                 noisy_KO_code = KO_polar_code + noise if 'KO' in args.encoder_type else noisy_code
 
@@ -167,7 +108,6 @@ def deeppolar_full_test(args, polar, KO, snr_range, device, info_positions, bina
                 ber_SC = errors_ber(msg_bits, decoded_SC_msg_bits.sign()).item()
                 bler_SC = errors_bler(msg_bits, decoded_SC_msg_bits.sign()).item()
                 total_block_errors_SC += int(bler_SC*args.test_batch_size)
-
                 if 'KO' in args.decoder_type:
                     if kernel:
                         if args.decoder_type == 'KO_parallel':
@@ -175,7 +115,7 @@ def deeppolar_full_test(args, polar, KO, snr_range, device, info_positions, bina
                         else:
                             KO_llrs, decoded_KO_msg_bits = KO.kernel_decode(args.kernel_size, KO.fnet_dict[1][0], noisy_KO_code, info_positions)
                     else:
-                        KO_llrs, decoded_KO_msg_bits = KO.KO_kernel_decode(noisy_KO_code, msg_bits if args.tf else None)
+                        KO_llrs, decoded_KO_msg_bits = KO.deeppolar_decode(noisy_KO_code)
                 else:  # if SC is also used for KO
                     KO_llrs, decoded_KO_msg_bits = KO.sc_decode_new(noisy_KO_code, snr)
 
@@ -199,6 +139,13 @@ def deeppolar_full_test(args, polar, KO, snr_range, device, info_positions, bina
             pass
 
         # Normalize cumulative metrics by the number of processed batches for accuracy
-        bers_KO_test[snr_ind] /= batches_processed
-        bers_SC_test[snr_ind] /= batches_processed
+        bers_KO_test[snr_ind] /= (batches_processed + 0.00000001)
+        bers_SC_test[snr_ind] /= (batches_processed + 0.00000001)
+        blers_KO_test[snr_ind] /= (batches_processed + 0.00000001)
+        blers_SC_test[snr_ind] /= (batches_processed + 0.00000001)
+        print(f"SNR: {snr} dB, Sigma: {sigma:.5f}, SC_BER: {bers_SC_test[snr_ind]:.6f}, SC_BLER: {blers_SC_test[snr_ind]:.6f}, KO_BER: {bers_KO_test[snr_ind]:.6f}, KO_BLER: {blers_KO_test[snr_ind]:.6f}")
+
+    return bers_SC_test, blers_SC_test, bers_KO_test, blers_KO_test
+
+
        

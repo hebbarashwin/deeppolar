@@ -80,22 +80,19 @@ class g_Full(nn.Module):
         x = y.clone()
         for ii, layer in enumerate(self.linears):
             if ii != self.depth:
-                if not (ii == 0 and self.only_side_info):
-                    x = self.activation_fn(layer(x))
-                    if self.use_skip and  ii == self.skip_layer:
-                        if len(x.shape) == 3:
-                            skip_input = torch.cat([y, get_augment(y)], dim = 2)
-                        elif len(x.shape) == 2:
-                            skip_input = torch.cat([y, get_augment(y)], dim = 1)
-                        for jj, skip_layer in enumerate(self.skip):
-                            skip_input = self.activation_fn(skip_layer(skip_input))
-                        x = x + skip_input
-                else:
-                    x = self.activation_fn(layer(get_augment(x)))
+                x = self.activation_fn(layer(x))
+                if self.use_skip and  ii == self.skip_layer:
+                    if len(x.shape) == 3:
+                        skip_input = torch.cat([y, g_Full.get_augment(y, self.ell)], dim = 2)
+                    elif len(x.shape) == 2:
+                        skip_input = torch.cat([y, g_Full.get_augment(y, self.ell)], dim = 1)
+                    for jj, skip_layer in enumerate(self.skip):
+                        skip_input = self.activation_fn(skip_layer(skip_input))
+                    x = x + skip_input
             else:
                 x = layer(x)
                 if self.augment:
-                    x = x + get_augment(y)
+                    x = x + g_Full.get_augment(y, self.ell)
         return x
 
 def weights_init(m):

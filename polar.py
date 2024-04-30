@@ -121,13 +121,13 @@ class PolarCode:
             u = (scaling * np.sqrt(self.N)*u)/torch.norm(scaling)
         return u
     
-    def channel(self, code, snr, noise_type = 'awgn', vv =5.0, radar_power = 20.0, radar_prob = 5e-2, isi_filter = None):
+    def channel(self, code, snr, noise_type = 'awgn', vv =5.0, radar_power = 20.0, radar_prob = 5e-2):
         if noise_type != "bsc":
             sigma = snr_db2sigma(snr)
         else:
             sigma = snr
 
-        r = corrupt_signal(code, sigma, noise_type, vv, radar_power, radar_prob, isi_filter)
+        r = corrupt_signal(code, sigma, noise_type, vv, radar_power, radar_prob)
 
         return r
 

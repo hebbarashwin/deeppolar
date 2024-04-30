@@ -7,7 +7,7 @@ import torch.utils.data
 
 import os
 import time
-import matplotlib
+import matplotlib 
 matplotlib.use('AGG')
 import matplotlib.pyplot as plt
 
@@ -52,169 +52,119 @@ def parse_int_list(input_string):
     except ValueError:
         raise argparse.ArgumentTypeError(f"List must contain integers, got '{input_string}'")
 
-# NN definition - ell_define_nns for kernel, ell_define_and_load for general NN
-# Encoding kernel_encode or KO_kernel_encode
-# Decoding KO_kernel_decode, or KO_kernel_decode
+# NN definition - define_kernel_nns for kernel, define_and_load_nns for general NN
+# Encoding kernel_encode or deeppolar_encode
+# Decoding kernel_decode, or deeppolar_decode
+
 def get_args():
-    parser = argparse.ArgumentParser(description='PAC codes')
+    parser = argparse.ArgumentParser(description='DeepPolar codes')
 
+    # General parameters
     parser.add_argument('--id', type=str, default=None, help='ID: optional, to run multiple runs of same hyperparameters') #Will make a folder like init_932 , etc.
-
-    parser.add_argument('--N', type=int, default=8)#, choices=[4, 8, 16, 32, 64, 128], help='Polar code parameter N')
-
-    parser.add_argument('--K', type=int, default=4)#, choices= [3, 4, 8,  16, 32, 64], help='Polar code parameter K')
-
-    parser.add_argument('--target_K', type=int, default=None)#, choices= [3, 4, 8,  16, 32, 64], help='Polar code parameter K')
-
-    parser.add_argument('-ell', '--kernel_size', type=int, default=2)#, choices= [3, 4, 8,  16, 32, 64], help='Polar code parameter K')
-
-    parser.add_argument('--infty', type=float, default=1000.)
-
     parser.add_argument('--test', dest = 'test', default=False, action='store_true', help='Testing?')
+    parser.add_argument('--pairwise', dest = 'pairwise', default=False, action='store_true', help='Plot codeword pairwise distances')
+    parser.add_argument('--epos', dest = 'epos', default=False, action='store_true', help='Plot error positions')
+    parser.add_argument('--only_args', dest = 'only_args', default=False, action='store_true', help='Helper to load functions on jupyter')
+    parser.add_argument('--gpu', type=int, default=-2, help='gpus used for training - e.g 0,1,3. -2 for cuda, -1 for cpu')
+    parser.add_argument('--seed', type=int, default=None, help='random seed')
+    parser.add_argument('--anomaly', dest = 'anomaly', default=False, action='store_true', help='enable anomaly detection')
+    parser.add_argument("--dataparallel", type=str2bool, nargs='?',
+                            const=True, default=False,
+                            help="Use Dataparallel")
 
-    parser.add_argument('--pairwise', dest = 'pairwise', default=False, action='store_true', help='Testing?')
+    # Code parameters
+    parser.add_argument('--N', type=int, default=256, help = 'Block length')#, choices=[4, 8, 16, 32, 64, 128], help='Polar code parameter N')
+    parser.add_argument('--K', type=int, default=37, help = 'Message size')#, choices= [3, 4, 8,  16, 32, 64], help='Polar code parameter K')
+    parser.add_argument('--rate_profile', type=str, default='polar', choices=['RM', 'polar', 'sorted', 'last', 'rev_polar', 'custom'], help='Polar rate profiling')
+    # parser.add_argument('--target_K', type=int, default=None)#, choices= [3, 4, 8,  16, 32, 64], help='Polar code parameter K')
+    parser.add_argument('-ell', '--kernel_size', type=int, default=16, help = 'Kernel size')
+    parser.add_argument('--polar_depths', type=parse_int_list, default = '',help='A comma-separated list of integers')
+    parser.add_argument('--last_ell', type=int, default=None, help='use kernel last_ell last layer')
+    parser.add_argument('--infty', type=float, default=1000., help = 'Infinity value (used for frozen position LLR in polar dec)')
+    parser.add_argument('--lse', type=str, default='minsum', choices=['minsum', 'lse'], help='LSE function for polar SC decoder')
+    parser.add_argument('--hard_decision', dest = 'hard_decision', default=False, action='store_true', help='polar code sc decoding hard decision?')
 
-    parser.add_argument('--epos', dest = 'epos', default=False, action='store_true', help='Testing?')
-
-    parser.add_argument('--only_args', dest = 'only_args', default=False, action='store_true')
-
-    parser.add_argument('--rate_profile', type=str, default='polar', choices=['RM', 'polar', 'sorted', 'last', 'rev_polar', 'custom'], help='PAC rate profiling')
-
-    parser.add_argument('--encoder_type', type=str, default='KO', choices=['KO', 'scaled', 'polar', 'KO_SI', 'KO_split'], help='Type of encoding')
-
-    parser.add_argument('--decoder_type', type=str, default='KO', choices=['KO', 'SC', 'KO_skip', 'KO_parallel', 'KO_last_parallel', 'RNN', 'KO_RNN'], help='Type of encoding')
-
+    # DeepPolar parameters
+    parser.add_argument('--encoder_type', type=str, default='KO', choices=['KO', 'scaled', 'polar'], help='Type of encoding')
+    parser.add_argument('--decoder_type', type=str, default='KO', choices=['KO', 'SC', 'KO_parallel', 'KO_last_parallel'], help='Type of encoding')
     parser.add_argument('--enc_activation', type=str, default='selu', choices=['selu', 'leaky_relu', 'gelu', 'silu', 'elu', 'mish', 'identity'], help='Activation function')
-
     parser.add_argument('--dec_activation', type=str, default='selu', choices=['selu', 'leaky_relu', 'gelu', 'silu', 'elu', 'mish', 'identity'], help='Activation function')
-
     parser.add_argument('--dropout_p', type=float, default=0.)
-
-    parser.add_argument('--weight_decay', type=float, default=0.)
-
-    parser.add_argument('--small_batch_size', type=int, default=20000, help='size of the batches')
-    parser.add_argument('--batch_size', type=int, default=20000, help='size of the batches')
-    parser.add_argument('--hidden_size', type=int, default=64, help='neural network size')
-    parser.add_argument('--enc_hidden_size', type=int, default=None, help='neural network size')
-
+    parser.add_argument('--dec_hidden_size', type=int, default=128, help='neural network size')
+    parser.add_argument('--enc_hidden_size', type=int, default=64, help='neural network size')
     parser.add_argument('-fd', '--f_depth', type=int, default=3, help='decoder neural network depth')
     parser.add_argument('-gd', '--g_depth', type=int, default=3, help='encoder neural network depth')
     parser.add_argument('-gsd', '--g_skip_depth', type=int, default=1, help='encoder neural network depth')
     parser.add_argument('-gsl', '--g_skip_layer', type=int, default=1, help='encoder neural network depth')
-
-    parser.add_argument('-fi', '--full_iters', type=int, default=20000, help='full iterations')
-    parser.add_argument('-ei', '--enc_train_iters', type=int, default=20, help='encoder iterations') #50
-    parser.add_argument('-di', '--dec_train_iters', type=int, default=100, help='decoder iterations') #500
-    parser.add_argument('--enc_train_snr', type=float, default=5., help='snr at enc are trained')
-    parser.add_argument('--dec_train_snr', type=float, default=3., help='snr at dec are trained')
-
-    parser.add_argument('--lse', type=str, default='minsum', choices=['minsum', 'lse'], help='loss function')
-    
-    parser.add_argument("--enc_augment", type=str2bool, nargs='?',
-                            const=True, default=False,
-                            help="Use augmentation?")
-
     parser.add_argument("--onehot", type=str2bool, nargs='?',
                             const=True, default=False,
                             help="Use onehot representation of prev_decoded_bits?")
-
     parser.add_argument("--shared", type=str2bool, nargs='?',
                             const=True, default=False,
                             help="Share weights across depth?")
-
-    parser.add_argument("--dataparallel", type=str2bool, nargs='?',
-                            const=True, default=False,
-                            help="Use dataparallel?")
-
-    parser.add_argument("--predict_direct", type=str2bool, nargs='?',
-                            const=True, default=False,
-                            help="Use dataparallel?")
-
-    parser.add_argument("--no_fig", type=str2bool, nargs='?',
-                            const=True, default=False,
-                            help="Use dataparallel?")
-
-    parser.add_argument('--polar_depths', type=parse_int_list, default = '',help='A comma-separated list of integers')
-
-    # TRAINING parameters
-
-    parser.add_argument('--initialization', type=str, default='random', choices=['random', 'zeros'], help='initialization')
-
-    parser.add_argument('--optim', type=str, default='Adam', choices=['Adam', 'RMS', 'SGD'], help='optimizer type')
-
-    parser.add_argument('--loss', type=str, default='BCE', choices=['MSE', 'BCE', 'BCE_reg', 'L1', 'huber', 'focal', 'BCE_bler'], help='loss function')
-
-    parser.add_argument('--regularizer', type=str, default=None, choices=['std', 'max_deviation','polar'], help='regularize')
-
-    parser.add_argument('-rw', '--regularizer_weight', type=float, default=0.001)
-
-    parser.add_argument('--dec_lr', type=float, default=0.0003, help='Decoder Learning rate')
-
-    parser.add_argument('--enc_lr', type=float, default=0.0003, help='Encoder Learning rate')
-
-    parser.add_argument('--scheduler', type=str, default=None, choices = ['reduce', '1cycle'],help='size of the batches')
-
-    parser.add_argument('--scheduler_patience', type=int, default=None, help='size of the batches')
-
-    parser.add_argument("--batch_schedule", type=str2bool, nargs='?',
-                            const=True, default=False,
-                            help="Batch scheduler")
-
-    parser.add_argument('--batch_patience', type=int, default=50, help='patience')
-
-    parser.add_argument('--batch_factor', type=int, default=2, help='patience')
-
-    parser.add_argument('--min_batch_size', type=int, default=500, help='patience')
-
-    parser.add_argument('--max_batch_size', type=int, default=50000, help='patience')
-
-
-    # TESTING parameters
-    parser.add_argument('--model_save_per', type=int, default=100, help='num of episodes after which model is saved')
-
-    parser.add_argument('--test_snr_start', type=float, default=-2., help='testing snr start')
-
-    parser.add_argument('--test_snr_end', type=float, default=7., help='testing snr end')
-
-    parser.add_argument('--snr_points', type=int, default=10, help='testing snr num points')
-
-    parser.add_argument('--test_batch_size', type=int, default=10000, help='size of the batches')
-
-    parser.add_argument('--test_size', type=int, default=100000, help='number of blocks')
-
-    parser.add_argument('--model_iters', type=int, default=None, help='by default load final model, option to load a model of x episodes')
-
-    parser.add_argument('--test_load_path', type=str, default=None, help='load test model given path')
-
-    parser.add_argument('--save_path', type=str, default=None, help='save name')
-
-    parser.add_argument('--load_path', type=str, default=None, help='load name')
-
-    parser.add_argument('--kernel_load_path', type=str, default=None, help='load name')
-
-    parser.add_argument('--hard_decision', dest = 'hard_decision', default=False, action='store_true', help='polar code sc decoding hard decision?')
-
     parser.add_argument("--skip", type=str2bool, nargs='?',
                             const=True, default=True,
                             help="Use skip")
-
     parser.add_argument("--use_norm", type=str2bool, nargs='?',
                             const=True, default=False,
                             help="Use norm")
-
     parser.add_argument("--binary", type=str2bool, nargs='?',
                             const=True, default=False,
                             help="")
 
-    parser.add_argument('--last_ell', type=int, default=None, help='use kernel last_ell last layer')
+    # Training parameters
+    parser.add_argument('-fi', '--full_iters', type=int, default=20000, help='full iterations')
+    parser.add_argument('-ei', '--enc_train_iters', type=int, default=20, help='encoder iterations') #50
+    parser.add_argument('-di', '--dec_train_iters', type=int, default=200, help='decoder iterations') #500
 
-    parser.add_argument('--gpu', type=int, default=-2, help='gpus used for training - e.g 0,1,3')
-
-    parser.add_argument('--seed', type=int, default=None, help='random seed')
-
-    parser.add_argument('--anomaly', dest = 'anomaly', default=False, action='store_true', help='enable anomaly detection')
+    parser.add_argument('--enc_train_snr', type=float, default=0., help='snr at enc are trained')
+    parser.add_argument('--dec_train_snr', type=float, default=-2., help='snr at dec are trained')
 
 
+    parser.add_argument('--initialization', type=str, default='random', choices=['random', 'zeros'], help='initialization')
+    parser.add_argument('--optim', type=str, default='Adam', choices=['Adam', 'RMS', 'SGD', 'AdamW'], help='optimizer type')
+    parser.add_argument('--weight_decay', type=float, default=0.0)
+    parser.add_argument('--loss', type=str, default='BCE', choices=['MSE', 'BCE', 'BCE_reg', 'L1', 'huber', 'focal', 'BCE_bler'], help='loss function')
+    parser.add_argument('--dec_lr', type=float, default=0.0003, help='Decoder Learning rate')
+    parser.add_argument('--enc_lr', type=float, default=0.0003, help='Encoder Learning rate')
+
+    parser.add_argument('--regularizer', type=str, default=None, choices=['std', 'max_deviation','polar'], help='regularize the kernel pretraining')
+    parser.add_argument('-rw', '--regularizer_weight', type=float, default=0.001)
+
+    parser.add_argument('--scheduler', type=str, default=None, choices = ['reduce', '1cycle'],help='size of the batches')
+    parser.add_argument('--scheduler_patience', type=int, default=None, help='size of the batches')
+
+    parser.add_argument('--small_batch_size', type=int, default=20000, help='size of the batches')
+    parser.add_argument('--batch_size', type=int, default=20000, help='size of the batches')
+    parser.add_argument("--batch_schedule", type=str2bool, nargs='?',
+                            const=True, default=False,
+                            help="Batch scheduler")
+    parser.add_argument('--batch_patience', type=int, default=50, help='patience')
+    parser.add_argument('--batch_factor', type=int, default=2, help='patience')
+    parser.add_argument('--min_batch_size', type=int, default=500, help='patience')
+    parser.add_argument('--max_batch_size', type=int, default=50000, help='patience')
+
+
+    parser.add_argument('--noise_type', type=str, default='awgn', choices=['fading', 'awgn', 'radar'], help='loss function')
+    parser.add_argument('--radar_power', type=float, default=None, help='snr at dec are trained')
+    parser.add_argument('--radar_prob', type=float, default=0.1, help='snr at dec are trained')
+
+
+    # TESTING parameters
+    parser.add_argument('--model_save_per', type=int, default=100, help='num of episodes after which model is saved')
+    parser.add_argument('--test_snr_start', type=float, default=-5., help='testing snr start')
+    parser.add_argument('--test_snr_end', type=float, default=-1., help='testing snr end')
+    parser.add_argument('--snr_points', type=int, default=5, help='testing snr num points')
+    parser.add_argument('--test_batch_size', type=int, default=10000, help='size of the batches')
+    parser.add_argument('--num_errors', type=int, default=100, help='Test until _ block errors')
+    parser.add_argument('--model_iters', type=int, default=None, help='by default load final model, option to load a model of x episodes')
+    parser.add_argument('--test_load_path', type=str, default=None, help='load test model given path')
+    parser.add_argument('--save_path', type=str, default=None, help='save name')
+    parser.add_argument('--load_path', type=str, default=None, help='load name')
+    parser.add_argument('--kernel_load_path', type=str, default=None, help='load name')
+    parser.add_argument("--no_fig", type=str2bool, nargs='?',
+                            const=True, default=False,
+                            help="Plot fig?")
 
     args = parser.parse_args()
 
@@ -238,11 +188,12 @@ if __name__ == '__main__':
         else:
             device = torch.device("cuda:{0}".format(args.gpu))
     else:
+        if args.gpu != 1:
+            print(f"GPU device {args.gpu if args.gpu != -2 else ''} not found.")
         device = torch.device("cpu")
 
     if args.seed is not None:
         torch.manual_seed(args.seed)
-    kwargs = {'num_workers': 1, 'pin_memory': False} if torch.cuda.is_available() else {}
 
     ID = str(np.random.randint(100000, 999999)) if args.id is None else args.id
 
@@ -302,12 +253,6 @@ if __name__ == '__main__':
         polar.define_kernel_nns(ell = args.kernel_size, unfrozen = polar.info_positions, fnet = args.decoder_type, gnet = args.encoder_type, shared = args.shared, augment=args.enc_augment)
     elif args.N > ell: # Initialize full network with pretrained kernels
         polar.define_and_load_nns(ell = args.kernel_size, kernel_load_path=args.kernel_load_path, fnet = args.decoder_type, gnet = args.encoder_type, shared = args.shared, augment=args.enc_augment, dataparallel=args.dataparallel)
-                    
-    # print("Encoder nets: ")
-    # print(polar.gnet_dict)
-
-    # print("Decoder nets: ")
-    # print(polar.fnet_dict)
 
     if args.binary:
         args.load_path = os.path.join(results_save_path, 'Models/fnet_gnet_final.pt')
@@ -441,14 +386,14 @@ if __name__ == '__main__':
                         best_batch_iter = iter                        
                 if 'KO' in args.decoder_type or args.decoder_type == 'RNN':
                     # Train decoder
-                    loss_dec, train_ber_dec = train(args, polar, dec_optimizer, dec_scheduler if args.scheduler == '1cycle' else None, batch_size, args.dec_train_snr, args.dec_train_iters, criterion, device, info_positions, binary = args.binary)
+                    loss_dec, train_ber_dec = train(args, polar, dec_optimizer, dec_scheduler if args.scheduler == '1cycle' else None, batch_size, args.dec_train_snr, args.dec_train_iters, criterion, device, info_positions, binary = args.binary, noise_type = args.noise_type)
                     if args.scheduler_patience is not None:
                         dec_scheduler.step(loss_dec)                    
                     bers_dec.append(train_ber_dec)
                     losses_dec.append(loss_dec)
                 if 'KO' in args.encoder_type:
                     # Train encoder
-                    loss_enc, train_ber_enc = train(args, polar, enc_optimizer, enc_scheduler if args.scheduler == '1cycle' else None, batch_size, args.enc_train_snr, args.enc_train_iters, criterion, device, info_positions, binary = args.binary)
+                    loss_enc, train_ber_enc = train(args, polar, enc_optimizer, enc_scheduler if args.scheduler == '1cycle' else None, batch_size, args.enc_train_snr, args.enc_train_iters, criterion, device, info_positions, binary = args.binary, noise_type = args.noise_type)
                     if args.scheduler_patience is not None:
                         enc_scheduler.step(loss_enc)                    
                     bers_enc.append(train_ber_enc)
@@ -474,14 +419,14 @@ if __name__ == '__main__':
                         best = True 
                     else:
                         best = False
-                    save_model(polar, iter, results_save_path, args.use_wandb, best = best)
+                    save_model(polar, iter, results_save_path, best = best)
                     plot_stuff(bers_enc, losses_enc, bers_dec, losses_dec, results_save_path)
-            save_model(polar, iter, results_save_path, args.use_wandb)
+            save_model(polar, iter, results_save_path)
             plot_stuff(bers_enc, losses_enc, bers_dec, losses_dec, results_save_path)
 
         except KeyboardInterrupt:
 
-            save_model(polar, iter, results_save_path, args.use_wandb)
+            save_model(polar, iter, results_save_path)
             plot_stuff(bers_enc, losses_enc, bers_dec, losses_dec, results_save_path)
 
             print("Exited and saved")
@@ -512,6 +457,7 @@ if __name__ == '__main__':
 
     start_time = time.time()
 
+    # For polar code testing.
     args2 = argparse.Namespace(**vars(args))
     args2.ell = 2
     Frozen = get_frozen(N, K, args2.rate_profile)
@@ -522,20 +468,20 @@ if __name__ == '__main__':
     if args.pairwise:
         codebook_size = 1000
         all_msg_bits = 2 * (torch.rand(codebook_size, args.K, device = device) < 0.5).float() - 1
-        KO_codebook = polar.KO_kernel_encode(all_msg_bits)
+        deeppolar_codebook = polar.deeppolar_encode(all_msg_bits)
         polar_codebook = polar_l_2.encode_plotkin(all_msg_bits)
         gaussian_codebook = F.normalize(torch.randn(codebook_size, args.N), p=2, dim=1)*np.sqrt(args.N)
 
         from scipy import stats
-        w_statistic_ko, p_value_ko = stats.shapiro(KO_codebook.detach().cpu().numpy())
+        w_statistic_deeppolar, p_value_deeppolar = stats.shapiro(deeppolar_codebook.detach().cpu().numpy())
         w_statistic_gaussian, p_value_gaussian = stats.shapiro(gaussian_codebook.detach().cpu().numpy())
         w_statistic_polar, p_value_polar = stats.shapiro(polar_codebook.detach().cpu().numpy())
 
-        print(f"KO Shapiro test W = {w_statistic_ko}, p-value = {p_value_ko}")
+        print(f"Deeppolar Shapiro test W = {w_statistic_deeppolar}, p-value = {p_value_deeppolar}")
         print(f"Gaussian Shapiro test W = {w_statistic_gaussian}, p-value = {p_value_gaussian}")
         print(f"Polar Shapiro test W = {w_statistic_polar}, p-value = {p_value_polar}")
 
-        dists_KO, md_KO = pairwise_distances(KO_codebook)
+        dists_deeppolar, md_deeppolar = pairwise_distances(deeppolar_codebook)
         dists_polar, md_polar = pairwise_distances(polar_codebook)
         dists_gaussian, md_gaussian = pairwise_distances(gaussian_codebook)
 
@@ -547,7 +493,7 @@ if __name__ == '__main__':
 
         # Plotting PDF for each list
         plt.figure()
-        plot_pdf(dists_KO, 'Neural', 300)
+        plot_pdf(dists_deeppolar, 'Neural', 300)
         # plot_pdf(dists_polar, 'Polar', 300)
         plot_pdf(dists_gaussian, 'Gaussian', 300)
 
@@ -584,47 +530,44 @@ if __name__ == '__main__':
                 polar_code = polar_l_2.encode_plotkin(msg_bits)
                 noisy_code = polar.channel(polar_code, args.dec_train_snr)
                 noise = noisy_code - polar_code
-                KO_polar_code = polar.KO_kernel_encode(msg_bits)
-                noisy_KO_code = KO_polar_code + noise
+                deeppolar_code = polar.deeppolar_encode(msg_bits)
+                noisy_deeppolar_code = deeppolar_code + noise
                 SC_llrs, decoded_SC_msg_bits = polar_l_2.sc_decode_new(noisy_code, args.dec_train_snr)
-                KO_llrs, decoded_KO_msg_bits = polar.KO_kernel_decode(noisy_KO_code)
+                deeppolar_llrs, decoded_deeppolar_msg_bits = polar.deeppolar_decode(noisy_deeppolar_code)
 
                 if k == 0:
-                    epos_KO = get_epos(msg_bits, decoded_KO_msg_bits.sign())
+                    epos_deeppolar = get_epos(msg_bits, decoded_deeppolar_msg_bits.sign())
                     epos_SC = get_epos(msg_bits, decoded_SC_msg_bits.sign())
                 else:
-                    epos_KO1 = get_epos(msg_bits, decoded_KO_msg_bits.sign())
+                    epos_deeppolar1 = get_epos(msg_bits, decoded_deeppolar_msg_bits.sign())
                     epos_SC1 = get_epos(msg_bits, decoded_SC_msg_bits.sign())
-                    epos_KO = epos_KO + epos_KO1
+                    epos_deeppolar = epos_deeppolar + epos_deeppolar1
                     epos_SC = epos_SC + epos_SC1
 
-            print(f"EPOS_KO: {epos_KO}")
+            print(f"epos_deeppolar: {epos_deeppolar}")
             print(f"EPOS_SC: {epos_SC}")
 
 
 
     start = time.time()
-    bers_SC_test, blers_SC_test, bers_KO_test, blers_KO_test, bers_KO_list_test, blers_KO_list_test = ell_polar_KO_full_test(args, polar_l_2, polar, snr_range, Test_Data_Generator, device, info_positions, only_list = False, binary = args.binary)#args.list_size is not None)
+    bers_SC_test, blers_SC_test, bers_deeppolar_test, blers_deeppolar_test = deeppolar_full_test(args, polar_l_2, polar, snr_range, device, info_positions, binary = args.binary, noise_type = args.noise_type, num_errors = args.num_errors)
     print("Test SNRs : {}\n".format(snr_range))
     print(f"Test Sigmas : {[snr_db2sigma(s) for s in snr_range]}\n")
-    print("BERs of KO: {0}".format(bers_KO_test))
+    print("BERs of DeepPolar: {0}".format(bers_deeppolar_test))
     print("BERs of SC decoding: {0}".format(bers_SC_test))
-    print("BLERs of KO: {0}".format(blers_KO_test))
+    print("BLERs of DeepPolar: {0}".format(blers_deeppolar_test))
     print("BLERs of SC decoding: {0}".format(blers_SC_test))
-    if args.list_size is not None:
-        print("BERs of KO list: {0}".format(bers_KO_list_test))
-        print("BLERs of KO list: {0}".format(blers_KO_list_test))
     print(f"time = {(time.time() - start)/60} minutes")
     ## BER
     plt.figure(figsize = (12,8))
 
     ok = 0
-    plt.semilogy(snr_range, bers_KO_test, label="KO", marker='*', linewidth=1.5)
+    plt.semilogy(snr_range, bers_deeppolar_test, label="DeepPolar", marker='*', linewidth=1.5)
 
     plt.semilogy(snr_range, bers_SC_test, label="SC decoder", marker='^', linewidth=1.5)
 
     ## BLER
-    plt.semilogy(snr_range, blers_KO_test, label="KO (BLER)", marker='*', linewidth=1.5, linestyle='dashed')
+    plt.semilogy(snr_range, blers_deeppolar_test, label="DeepPolar (BLER)", marker='*', linewidth=1.5, linestyle='dashed')
 
     plt.semilogy(snr_range, blers_SC_test, label="SC decoder (BLER)", marker='^', linewidth=1.5, linestyle='dashed')
 
@@ -632,13 +575,13 @@ if __name__ == '__main__':
     plt.xlabel("SNR (dB)", fontsize=16)
     plt.ylabel("Error Rate", fontsize=16)
     if args.enc_train_iters > 0:
-        plt.title("PolarC({2}, {3}): KO trained at Dec_SNR = {0} dB, Enc_SNR = {1}dB".format(args.dec_train_snr, args.enc_train_snr, args.K,args.N))
+        plt.title("PolarC({2}, {3}): DeepPolar trained at Dec_SNR = {0} dB, Enc_SNR = {1}dB".format(args.dec_train_snr, args.enc_train_snr, args.K,args.N))
     else:
-        plt.title("Polar({1}, {2}): KO trained at Dec_SNR = {0} dB".format(args.dec_train_snr, args.K,args.N))
+        plt.title("Polar({1}, {2}): DeepPolar trained at Dec_SNR = {0} dB".format(args.dec_train_snr, args.K,args.N))
     plt.legend(prop={'size': 15})
     if args.test_load_path is not None:
         os.makedirs('Polar_Results/figures', exist_ok=True)
-        fig_save_path = 'Polar_Results/figures/new_plot_KO.pdf'
+        fig_save_path = 'Polar_Results/figures/new_plot_DeepPolar.pdf'
     else:
         fig_save_path = results_load_path + f"/Step_{args.model_iters if args.model_iters is not None else 'final'}{'_binary' if args.binary else ''}.pdf"
     if not args.no_fig:

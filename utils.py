@@ -4,6 +4,14 @@ from torch.distributions import Normal, StudentT
 import numpy as np
 from itertools import combinations
 
+def snr_db2sigma(train_snr):
+    return 10**(-train_snr*1.0/20)
+
+def moving_average(a, n=3) :
+    ret = np.cumsum(a, dtype=float)
+    ret[n:] = ret[n:] - ret[:-n]
+    return ret[n - 1:] / n
+
 def errors_ber(y_true, y_pred, mask=None):
     if mask == None:
         mask=torch.ones(y_true.size(),device=y_true.device)
@@ -30,7 +38,7 @@ def errors_bler(y_true, y_pred, get_pos = False):
         err_pos = list(np.nonzero((np.sum(tp0,axis=1)>0).astype(int))[0])
         return bler_err_rate, err_pos
 
-def corrupt_signal(input_signal, sigma = 1.0, noise_type = 'awgn', vv =5.0, radar_power = 20.0, radar_prob = 0.05, isi_filter = None):
+def corrupt_signal(input_signal, sigma = 1.0, noise_type = 'awgn', vv =5.0, radar_power = 20.0, radar_prob = 0.05):
 
     data_shape = input_signal.shape  # input_signal has to be a numpy array.
     assert noise_type in ['bsc', 'awgn', 'fading', 'radar', 't-dist', 'isi_perfect', 'isi_uncertain'], "Invalid noise type"
@@ -46,7 +54,6 @@ def corrupt_signal(input_signal, sigma = 1.0, noise_type = 'awgn', vv =5.0, rada
         corrupted_signal = fading_h *(input_signal) + noise
 
     elif noise_type == 'radar':
-        radar_power = 10.0
         add_pos     = np.random.choice([0.0, 1.0], data_shape,
                                        p=[1 - radar_prob, radar_prob])
 

@@ -2,10 +2,8 @@ import torch
 from utils import moving_average
 import matplotlib.pyplot as plt
 import os
-#import wandb
 
-
-def save_model(polar, iter, results_save_path, use_wandb = False, modulation = False, best = False):
+def save_model(polar, iter, results_save_path, best = False):
     torch.save([polar.fnet_dict, polar.gnet_dict, polar.depth_map], os.path.join(results_save_path, 'Models/fnet_gnet_{}.pt'.format(iter)))
     if iter > 1:
         torch.save([polar.fnet_dict, polar.gnet_dict, polar.depth_map], os.path.join(results_save_path, 'Models/fnet_gnet_{}.pt'.format('final')))
