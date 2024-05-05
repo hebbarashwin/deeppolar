@@ -18,7 +18,7 @@ class DeepPolar(PolarCode):
         # Frozen.sort()
 
         self.args = args
-        Fr = get_frozen(N, K, self.args.rate_profile, args.target_K)
+        Fr = get_frozen(N, K, self.args.rate_profile)
         super().__init__(n = int(np.log2(N)), K = K, Fr=Fr,  infty = infty)
         self.N = N
 
@@ -204,7 +204,7 @@ class DeepPolar(PolarCode):
                             #     self.fnet_dict[depth][bit_position][current_position] = f_Full(ell**depth, dec_hidden_size, 1, activation = self.args.dec_activation, dropout_p = self.args.dropout_p, depth = self.args.f_depth).to(self.device)
                             # else:
                             self.fnet_dict[depth][bit_position][current_position] = f_Full(input_size, dec_hidden_size, output_size, activation = self.args.dec_activation, dropout_p = self.args.dropout_p, depth = self.args.f_depth, use_norm = self.args.use_norm).to(self.device)
-                            if ckpt_exists
+                            if ckpt_exists :
                                 try:
                                     f_ckpt = ckpt[0][1][0][current_position].state_dict()
                                 except:

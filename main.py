@@ -250,9 +250,9 @@ if __name__ == '__main__':
     ##############
     ell = args.kernel_size
     if args.N == ell: # Kernel pre-training
-        polar.define_kernel_nns(ell = args.kernel_size, unfrozen = polar.info_positions, fnet = args.decoder_type, gnet = args.encoder_type, shared = args.shared, augment=args.enc_augment)
+        polar.define_kernel_nns(ell = args.kernel_size, unfrozen = polar.info_positions, fnet = args.decoder_type, gnet = args.encoder_type, shared = args.shared)
     elif args.N > ell: # Initialize full network with pretrained kernels
-        polar.define_and_load_nns(ell = args.kernel_size, kernel_load_path=args.kernel_load_path, fnet = args.decoder_type, gnet = args.encoder_type, shared = args.shared, augment=args.enc_augment, dataparallel=args.dataparallel)
+        polar.define_and_load_nns(ell = args.kernel_size, kernel_load_path=args.kernel_load_path, fnet = args.decoder_type, gnet = args.encoder_type, shared = args.shared, dataparallel=args.dataparallel)
 
     if args.binary:
         args.load_path = os.path.join(results_save_path, 'Models/fnet_gnet_final.pt')
