@@ -1,5 +1,5 @@
 # DeepPolar codes
-Code for "(DeepPolar: Inventing Nonlinear Large-Kernel Polar Codes via Deep Learning)[https://arxiv.org/abs/2402.08864]", ICML 2024 
+Code for "[DeepPolar: Inventing Nonlinear Large-Kernel Polar Codes via Deep Learning](https://arxiv.org/abs/2402.08864)", ICML 2024 
 
 ## Installation
 
